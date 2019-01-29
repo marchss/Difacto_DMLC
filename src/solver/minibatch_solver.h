@@ -4,6 +4,10 @@
  */
 #include "solver/iter_solver.h"
 #include "base/minibatch_iter.h"
+#include "base/workload.h"
+#include "base/workload_pool.h"
+#include <unistd.h>
+
 namespace dmlc {
 namespace solver {
 
@@ -31,6 +35,9 @@ class MinibatchScheduler : public IterScheduler {
 
   /// \brief print the progress for every k seconds. only valid for the online model
   int print_sec_ = 1;
+
+  /// \brief save the model for every k seconds. only valid for the online model
+  int save_sec_ = 1;
 
   /// \brief the maximal number of data passes
   int max_data_pass_ = 1;
@@ -70,6 +77,7 @@ class MinibatchScheduler : public IterScheduler {
     use_worker_local_data_ = conf.local_data();
     max_data_pass_         = conf.max_data_pass();
     print_sec_             = conf.print_sec();
+    save_sec_              = conf.save_sec();
     save_iter_             = conf.save_iter();
     load_iter_             = conf.load_iter();
     model_in_              = conf.model_in();
@@ -81,12 +89,96 @@ class MinibatchScheduler : public IterScheduler {
   MinibatchScheduler() { }
   virtual ~MinibatchScheduler() { }
 
+  bool always_run() {
+    if (model_in_.size()) {
+      Wait(LoadModel(model_in_, 0));
+      printf("Loading the model:%s\n", model_in_.c_str());
+    }
+    bool stop = false;
+    int train_time = 0;
+    while (true) {
+      data_filename_ = train_data_;
+      int MAXLINE=1024;
+
+      std::string cmd = "ls "+data_filename_+" | wc -l";
+      FILE *fp;
+      fp = popen(cmd.c_str(), "r");
+      if(NULL == fp) {
+         perror("popen fail!\n");
+      }
+      std::string res;
+      char result_buf[MAXLINE];
+      int file_cnt = 0;
+      while(fgets(result_buf, sizeof(result_buf), fp) != NULL){
+        file_cnt = atoi(result_buf);
+      }
+      pclose(fp);
+      printf("train file number: %d\n", file_cnt);
+      if(file_cnt <=0){
+        sleep(print_sec_*5);
+        printf("%s is empty, waiting...\n", data_filename_.c_str());
+        continue;
+      }
+
+
+      workload_.data_pass = 0;
+      workload_.type = Workload::TRAIN;
+
+      auto disp = ProgHeader();
+      if (disp.size()) {
+        printf("  sec %s\n", disp.c_str());
+        fflush(stdout);
+      }
+
+      StartDispatch();
+      printf("pool task size:%d\n", pool_.task_.size());
+      vector<string> train_files;
+      for(std::unordered_map<std::string, dmlc::WorkloadPool::Task>::iterator iter=pool_.task_.begin();iter!=pool_.task_.end();iter++ ){
+        train_files.push_back(iter->first);
+      }
+
+      // print every k sec for training
+      //printf("save_sec:%d\n", save_sec_);
+      bool is_train = true;
+      while (!IsFinished()) {
+        sleep(print_sec_);
+        train_time += print_sec_;
+        printf("train_time:%d\n", train_time);
+        if(train_time>=save_sec_){
+          train_time = 0;
+          time_t t = time(0);
+          char ch[64];
+          strftime(ch, sizeof(ch), "%Y-%m-%d_%H-%M-%S", localtime(&t));
+          std::string model_name = model_out_+"_"+ch;
+          Wait(SaveModel(model_name, 0));
+          printf("save the model:%s\n", model_name.c_str());
+        }
+        if (is_train) {
+          stop = ShowProgress(is_train);
+          if (stop)
+            StopDispatch();  // wait all assigned workload finished
+        }
+      }
+      // remove the train data
+      sleep(1);
+      for( auto f: train_files){
+        std::string cmd = "rm "+f;
+        system(cmd.c_str());
+        printf("rm the file:%s\n", f.c_str());
+      }
+
+    }
+
+    return stop;
+  }
+
   /// \brief run iterations
   virtual bool Run() {
     printf("Connected %d servers and %d workers\n",
            ps::NodeInfo::NumServers(), ps::NodeInfo::NumWorkers());
 
     start_time_ = GetTime();
+    return always_run();
 
     bool is_predict = predict_out_.size();
     if (is_predict) {
@@ -300,6 +392,11 @@ class MinibatchWorker : public IterWorker {
 
     CHECK_GE(wl.file.size(), (size_t)1);
     auto file = wl.file[0];
+    if ((access( file.filename.c_str(), F_OK)) == -1) {
+      fprintf(stderr, "########### can not access:%s\n", file.filename.c_str());
+      return;
+    }
+    
     dmlc::data::MinibatchIter<FeaID> reader(
         file.filename.c_str(), file.k, file.n, file.format.c_str(),
         mb_size, shuffle, neg_sp);

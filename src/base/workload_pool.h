@@ -222,7 +222,8 @@ class WorkloadPool {
     std::vector<int> track;
     size_t done = 0;
   };
-  std::unordered_map<std::string, Task> task_;
+  public:
+    std::unordered_map<std::string, Task> task_;
 
 
   struct Assigned {

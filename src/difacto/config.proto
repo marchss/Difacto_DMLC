@@ -130,6 +130,9 @@ message Config {
   /// print the progress every n sec during training. 1 sec in default
   optional float print_sec = 111 [default = 1];
 
+  /// save the model every n sec during training. 1 sec in default
+  optional float save_sec = 113 [default = 3600];
+
   /// learning rate :math:`\beta`, 1 in default
   optional float lr_beta = 112 [default = 1];
 

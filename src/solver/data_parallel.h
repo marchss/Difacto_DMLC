@@ -165,6 +165,7 @@ class DataParScheduler : public ps::App {
     task.set_cmd(cmd.cmd); return Submit(task, id);
   }
 
+ public:
   WorkloadPool pool_;
 };
 
