@@ -396,7 +396,14 @@ class MinibatchWorker : public IterWorker {
       fprintf(stderr, "########### can not access:%s\n", file.filename.c_str());
       return;
     }
-    
+
+    //check for train data files ending with extension '*.ready'
+    std::string str2 = file.filename.substr (file.filename.size()-5,5);  
+    if(str2 != string("ready")) {
+      fprintf(stderr, "########### not ready:%s\n", file.filename.c_str());
+      return;
+    }
+
     dmlc::data::MinibatchIter<FeaID> reader(
         file.filename.c_str(), file.k, file.n, file.format.c_str(),
         mb_size, shuffle, neg_sp);

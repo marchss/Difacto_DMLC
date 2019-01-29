@@ -88,9 +88,49 @@ class Dump {
     cout << "dumped " << dumped << " kv pairs\n";
   }
 
+  void DumpModel2(const std::string filename) {
+    int dumped = 0;
+    FILE * stream;
+    stream=fopen(filename.c_str(),"w");
+    for (const auto& it : data_) {
+      if (it.second.Empty()) continue;
+      float w0 = it.second.size == 1 ? *(float *)&(it.second.w) : it.second.w[0];
+      if(abs(w0) <0.000001) continue;
+      uint64_t feature_id = need_inverse_ ? ReverseBytes(it.first) : it.first;
+      fwrite(&feature_id,sizeof(uint64_t),1,stream);
+      int val_size = it.second.size;
+      fwrite(&val_size,sizeof(val_size),1,stream);
+      if (it.second.size == 1) {
+         float tmp = *(float *)&(it.second.w);
+         fwrite(&tmp, sizeof(tmp),1,stream);
+      }else{
+        for (int i = 0; i < it.second.size; ++i) {
+            float tmp = it.second.w[i];
+            fwrite(&tmp, sizeof(float),1,stream);
+        }
+      }
+
+      /*os << feature_id << '\t';
+      os << it.second.size;
+      if (it.second.size == 1) {
+        os << '\t' << *(float *)&(it.second.w) << '\t' << *(float *)&(it.second.sqc_grad) << '\n';
+      } else {
+        for (int i = 0; i < it.second.size; ++i) {
+          os << '\t' << it.second.w[i];
+        }
+        os << '\t' << it.second.sqc_grad_0() << '\n';
+      }*/
+      dumped ++;
+    }
+    fflush(stream);
+    fclose(stream);
+    cout << "dumped " << dumped << " kv pairs\n";
+  }
+
   void run() {
     LoadModel(file_in_);
     DumpModel(file_out_);
+    DumpModel2(file_out_);
   }
 
  private:
